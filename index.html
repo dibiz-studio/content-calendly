@@ -934,13 +934,32 @@ import {
   updateDoc, deleteDoc, onSnapshot, query, where, documentId,
   serverTimestamp, setDoc, writeBatch
 } from 'https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js';
-import { firebaseConfig } from 'api/firebase-config.js';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // ⚠️  REPLACE THIS WITH YOUR FIREBASE PROJECT CONFIG
 //     Firebase console → Project settings → Your apps → SDK setup
+const firebaseConfig = await (async () => {
+  try {
+    const res = await fetch('/api/firebase-config');
+    if (!res.ok) throw new Error(`Firebase config request failed (${res.status})`);
+    const config = await res.json();
+    if (config?.apiKey && config?.projectId && config?.appId) return config;
+    throw new Error('Firebase config response was incomplete');
+  } catch (err) {
+    console.warn('Falling back to inline Firebase config:', err);
+    return {
+      apiKey: "AIzaSyAAmpAKp6lsXHE1UaJseGEBzRNU5Ek_IQ",
+      authDomain: "content-calendly.firebaseapp.com",
+      projectId: "content-calendly",
+      storageBucket: "content-calendly.firebasestorage.app",
+      messagingSenderId: "469206946182",
+      appId: "1:469206946182:web:f982a395cdfbabe0a2dc07",
+      measurementId: "G-TK48S254EQ"
+    };
+  }
+})();
 if (!firebaseConfig?.apiKey || !firebaseConfig?.projectId || !firebaseConfig?.appId) {
-  throw new Error('Missing Firebase config values in firebase-config.js');
+  throw new Error('Missing Firebase config values');
 }
 const fbApp = initializeApp(firebaseConfig);
 const auth  = getAuth(fbApp);
