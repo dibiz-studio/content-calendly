@@ -935,18 +935,50 @@ import {
   serverTimestamp, setDoc, writeBatch
 } from 'https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js';
 
+async function loadEnvFile(path = '.env') {
+  const response = await fetch(path, { cache: 'no-store' });
+  if (!response.ok) {
+    throw new Error(`Unable to load ${path}`);
+  }
+  const text = await response.text();
+  const env = {};
+
+  for (const rawLine of text.split(/\r?\n/)) {
+    const line = rawLine.trim();
+    if (!line || line.startsWith('#')) continue;
+    const idx = line.indexOf('=');
+    if (idx === -1) continue;
+    const key = line.slice(0, idx).trim();
+    let value = line.slice(idx + 1).trim();
+    if ((value.startsWith('"') && value.endsWith('"')) || (value.startsWith("'") && value.endsWith("'"))) {
+      value = value.slice(1, -1);
+    }
+    env[key] = value;
+  }
+
+  return env;
+}
+
+function buildFirebaseConfig(env) {
+  return {
+    apiKey: env.FIREBASE_API_KEY,
+    authDomain: env.FIREBASE_AUTH_DOMAIN,
+    projectId: env.FIREBASE_PROJECT_ID,
+    storageBucket: env.FIREBASE_STORAGE_BUCKET,
+    messagingSenderId: env.FIREBASE_MESSAGING_SENDER_ID,
+    appId: env.FIREBASE_APP_ID,
+    measurementId: env.FIREBASE_MEASUREMENT_ID,
+  };
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // ⚠️  REPLACE THIS WITH YOUR FIREBASE PROJECT CONFIG
 //     Firebase console → Project settings → Your apps → SDK setup
-const firebaseConfig = {
-  apiKey: "AIzaSyAAmpAKp6lsXHE1UaJseGEBRzNUE5Ek_IQ",
-  authDomain: "content-calendly.firebaseapp.com",
-  projectId: "content-calendly",
-  storageBucket: "content-calendly.firebasestorage.app",
-  messagingSenderId: "469206946182",
-  appId: "1:469206946182:web:f982a395cdfbabe0a2dc07",
-  measurementId: "G-TK48S254EQ"
-};
+const env = await loadEnvFile();
+const firebaseConfig = buildFirebaseConfig(env);
+if (!firebaseConfig.apiKey || !firebaseConfig.projectId || !firebaseConfig.appId) {
+  throw new Error('Missing Firebase config values in .env');
+}
 const fbApp = initializeApp(firebaseConfig);
 const auth  = getAuth(fbApp);
 const db    = getFirestore(fbApp);
