@@ -1,0 +1,114 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // ── Helpers ────────────────────────────────────────────────
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function myUid() {
+      return request.auth.uid;
+    }
+
+    function userDoc() {
+      return get(/databases/$(database)/documents/users/$(myUid())).data;
+    }
+
+    function isTeam() {
+      return isSignedIn() &&
+        exists(/databases/$(database)/documents/users/$(myUid())) &&
+        userDoc().role == 'team';
+    }
+
+    // True if the signed-in user has a brandMembers record for this brand
+    function hasBrandAccess(brandId) {
+      return isSignedIn() &&
+        exists(/databases/$(database)/documents/brandMembers/$(brandId + '_' + myUid()));
+    }
+
+    // ── users ──────────────────────────────────────────────────
+    // Anyone signed in can read user docs (needed to look up emails for invites).
+    // A user can only create/update their OWN doc, and can never set role
+    // themselves (role changes must be done manually in the console).
+    match /users/{userId} {
+      allow read: if isSignedIn();
+
+      allow create: if isSignedIn() && userId == myUid() &&
+        request.resource.data.role == 'client';
+
+      allow update: if isSignedIn() && userId == myUid() &&
+        request.resource.data.role == resource.data.role; // role is immutable from client
+
+      allow delete: if false;
+    }
+
+    // ── brands ─────────────────────────────────────────────────
+    match /brands/{brandId} {
+      allow read: if isTeam() || hasBrandAccess(brandId);
+      allow create, update, delete: if isTeam();
+    }
+
+    // ── ideas ──────────────────────────────────────────────────
+    match /ideas/{ideaId} {
+      // Team sees everything. Clients can only read ideas belonging
+      // to a brand they have access to.
+      allow read: if isTeam() ||
+        (isSignedIn() && hasBrandAccess(resource.data.brandId));
+      allow create, update, delete: if isTeam();
+    }
+
+    // ── goals ──────────────────────────────────────────────────
+    // Team only — clients never see Goals.
+    match /goals/{goalId} {
+      allow read, create, update, delete: if isTeam();
+    }
+
+    // ── reviews ────────────────────────────────────────────────
+    // Team only — clients never see Weekly Review.
+    match /reviews/{reviewId} {
+      allow read, create, update, delete: if isTeam();
+    }
+
+    // ── brandMembers ───────────────────────────────────────────
+    // Doc ID convention: {brandId}_{uid}
+    match /brandMembers/{memberId} {
+      // Team can read/manage all. A client can read only their own
+      // membership records (needed to resolve which brands they can see).
+      allow read: if isTeam() ||
+        (isSignedIn() && resource.data.uid == myUid());
+
+      // Team manually grants access (e.g. instant-invite of an existing user)
+      allow create, delete: if isTeam() ||
+        // OR: a client is allowed to create their OWN membership record
+        // when processPendingInvites() converts an invite into membership
+        (isSignedIn() &&
+          request.resource.data.uid == myUid() &&
+          memberId == request.resource.data.brandId + '_' + myUid() &&
+          exists(/databases/$(database)/documents/invites/$(request.resource.data.brandId + '_' + request.resource.data.email)));
+
+      allow update: if isTeam();
+    }
+
+    // ── invites ────────────────────────────────────────────────
+    // Doc ID convention: {brandId}_{email}
+    match /invites/{inviteId} {
+      // Team manages invites freely.
+      allow read, create, update: if isTeam();
+
+      // A client also needs to read invites addressed to their own email
+      // (processPendingInvites queries by email) and delete them once
+      // converted into a brandMembers record.
+      // NOTE: your app always writes invite emails as lowercase
+      // (user.email.toLowerCase()) — keep doing that, since Firestore
+      // rules have no .lower() / .toLowerCase() string method to rely on.
+      allow read: if isSignedIn() &&
+        resource.data.email == request.auth.token.email;
+
+      allow delete: if isTeam() ||
+        (isSignedIn() &&
+          resource.data.email == request.auth.token.email);
+    }
+  }
+}
